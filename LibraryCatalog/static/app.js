@@ -380,7 +380,22 @@ async function performSearch() {
             if (currentSource === 'gutendex') endpoint = '/gutendex/search';
             if (currentSource === 'knigafund') endpoint = '/knigafund/search';
             if (currentSource === 'aggregate') endpoint = '/search/aggregate';
-            response = await fetch(`${API_BASE}${endpoint}?${params}`);
+            try {
+    response = await fetch(`${API_BASE}${endpoint}?${params}`, {
+        method: 'GET',
+        headers: {
+            'Content-Type': 'application/json'
+        }
+    });
+} catch (networkError) {
+    console.error('NETWORK ERROR:', networkError);
+
+    hideLoading();
+
+    showError('Сервер недоступен');
+
+    return;
+}
         } else if (currentFilters.genre) {
             const params = new URLSearchParams({
                 page: currentPage,
@@ -390,9 +405,16 @@ async function performSearch() {
             response = await fetch(`${API_BASE}/books?${params}`);
         }
         
-        if (!response.ok) {
-            throw new Error(`HTTP error! status: ${response.status}`);
-        }
+       if (!response || !response.ok) {
+
+    console.error('BAD RESPONSE:', response);
+
+    hideLoading();
+
+    showError(`Ошибка сервера: ${response ? response.status : 'нет ответа'}`);
+
+    return;
+}
         
         const data = await response.json();
         
@@ -469,17 +491,39 @@ async function performFallbackSearch() {
     return null;
 }
 
-async function fetchJsonWithTimeout(url, timeoutMs) {
-    const ctrl = new AbortController();
-    const to = setTimeout(() => ctrl.abort(), timeoutMs);
+async function fetchJsonWithTimeout(url, timeoutMs = 5000) {
+
+    const controller = new AbortController();
+
+    const timeout = setTimeout(() => {
+        controller.abort();
+    }, timeoutMs);
+
     try {
-        const r = await fetch(url, { signal: ctrl.signal });
-        if (!r.ok) return null;
-        return await r.json();
-    } catch (e) {
+
+        const response = await fetch(url, {
+            signal: controller.signal,
+            headers: {
+                'Content-Type': 'application/json'
+            }
+        });
+
+        clearTimeout(timeout);
+
+        if (!response.ok) {
+            console.error('FETCH FAILED:', response.status);
+            return null;
+        }
+
+        return await response.json();
+
+    } catch (error) {
+
+        clearTimeout(timeout);
+
+        console.error('FETCH TIMEOUT OR NETWORK ERROR:', error);
+
         return null;
-    } finally {
-        clearTimeout(to);
     }
 }
 
@@ -492,7 +536,14 @@ function fastSearch(url, timeoutMs = 4000) {
 }
 
 async function firstResolved(promises) {
-    return Promise.any(promises).catch(() => null);
+   return Promise.any(
+    promises.map(p =>
+        p.catch(err => {
+            console.error(err);
+            return null;
+        })
+    )
+).catch(() => null);
 }
 
 // Отображение результатов
